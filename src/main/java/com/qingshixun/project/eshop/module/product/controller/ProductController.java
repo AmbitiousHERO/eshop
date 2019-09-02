@@ -9,9 +9,11 @@ import com.qingshixun.project.eshop.module.brand.service.BrandServiceImpl;
 import com.qingshixun.project.eshop.module.cart.service.CartItemServiceImpl;
 import com.qingshixun.project.eshop.module.evaluate.service.EvaluateServiceImpl;
 import com.qingshixun.project.eshop.module.order.service.OrderServiceImpl;
+import com.qingshixun.project.eshop.module.personal.service.PersonalService;
 import com.qingshixun.project.eshop.module.product.service.ProductCategoryServiceImpl;
 import com.qingshixun.project.eshop.module.product.service.ProductServiceImpl;
 import com.qingshixun.project.eshop.module.product.service.ProductTypeAttributeServiceImpl;
+import com.qingshixun.project.eshop.util.DateUtils;
 import com.qingshixun.project.eshop.web.BaseController;
 import com.qingshixun.project.eshop.web.ResponseData;
 import com.qingshixun.project.eshop.web.SimpleHandler;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Date;
 import java.util.List;
 
 @Controller
@@ -47,6 +50,12 @@ public class ProductController extends BaseController {
     @Autowired
     private OrderServiceImpl orderService;
     
+    @Autowired
+    private PersonalService personalService;
+
+    @Autowired
+    private ProductCategoryServiceImpl productCategoryServiceImpl;
+
     /**
      * 商品列表页
      */
@@ -58,12 +67,14 @@ public class ProductController extends BaseController {
 
         // 非空验证
         if (!products.isEmpty()) {
+
             // 获取第一个商品的类型id
             Long typeId = products.get(0).getProductType().getId();
             //品牌
             model.addAttribute("brands", brandService.getBrandsByCategory(categoryId));
             //可选择的筛选条件
             model.addAttribute("productTypeAttributes", productTypeAttributeService.getProductTypeAttributesByProductType(typeId));
+
         }
         //左侧分类
         model.addAttribute("productCategories", productCategoryService.getProductCategories());
@@ -74,6 +85,7 @@ public class ProductController extends BaseController {
         return "/product/list";
     }
 
+
     /**
      * 产品详情中的评论列表中除评论外的数据
      * @param model
@@ -82,9 +94,18 @@ public class ProductController extends BaseController {
      */
     @RequestMapping("/main")
     public String main(Model model, @RequestParam Long productId) {
-        ProductDTO product = productService.getProduct(productId);
 
-        MemberDTO member = getCurrentUser();
+        ProductDTO product = productService.getProduct(productId);
+        final MemberDTO member = this.getCurrentUser();
+        
+        if(member != null) {
+        	String createTime = DateUtils.timeToString(new Date());
+        	Long memberId = member.getId();
+            personalService.saveIds(productId,memberId,createTime);}
+        
+        //MemberDTO member = getCurrentUser();
+        
+        int quantity = 1;
 
         model.addAttribute("product", product);
         model.addAttribute("cart", new CartItemDTO());
@@ -96,7 +117,9 @@ public class ProductController extends BaseController {
         model.addAttribute("commonlyEvaluateCount", evaluateService.getEvaluateCountByStatusAndProduct("一般", product.getId()));
         model.addAttribute("disSatisfiedEvaluateCount", evaluateService.getEvaluateCountByStatusAndProduct("不满意", product.getId()));
         model.addAttribute("totalCartCount", cartItemService.getTotalCartCount(member, getSession()));
-
+        model.addAttribute("quantity",quantity);
+        //model.addAttribute("productId",productId);
+        
         return "/product/main";
     }
 
@@ -123,6 +146,7 @@ public class ProductController extends BaseController {
      */
     @RequestMapping("/evaluate/{productId}/{orderId}")
     public String productEvaluate(Model model, @PathVariable Long productId, @PathVariable Long orderId) throws Exception {
+    	
         // 获取当前的登录用户
         MemberDTO dbMember = this.getCurrentUser();
         model.addAttribute("product", productService.getProduct(productId));
@@ -159,15 +183,55 @@ public class ProductController extends BaseController {
 
     @RequestMapping("/search/list")
     public String getSelectProduct(Model model, @RequestParam(required = false) String searchPargam, @RequestParam(required = false) int brandId, @RequestParam Long categoryId){
+        List<ProductDTO> tempProducts = null;
+        List<ProductDTO> products = null;
+        Long[] num_1 = null;
+        Long[] num_2 = {};
+        Long[] tempNum = null;
+        if (productCategoryServiceImpl.getProductCategoriesStatus(categoryId)!=null){
+            num_2 = productCategoryServiceImpl.getProductCategoriesId(categoryId);
+        }else {
+            num_1 = productCategoryServiceImpl.getProductCategoriesId(categoryId);
+            for (int i = 0; i < num_1.length; i++) {
+                tempNum = productCategoryServiceImpl.getProductCategoriesId(num_1[i]);
+                num_2 = mergeLongArray(tempNum,num_2);
+            }
+        }
+
         String selectAttribute = null;
         if (!("".equals(searchPargam))){
             searchPargam = searchPargam.replace(",","%");
              selectAttribute = searchPargam.substring(0,searchPargam.length()-1);
         }
 
-        List<ProductDTO> products = productService.getProductBySelect(selectAttribute,brandId,categoryId);
+        products = productService.getProductBySelect(selectAttribute,brandId,categoryId);
+
+        if(num_2!=null){
+            for (int i = 0; i < num_2.length; i++) {
+                tempProducts = productService.getProductBySelect(selectAttribute,brandId,num_2[i]);
+                products = mergeList(tempProducts,products);
+            }
+        }
         model.addAttribute("products", products);
         return "/product/select";
+    }
+
+    public List<ProductDTO> mergeList(List<ProductDTO> tempProducts, List<ProductDTO> products){
+        for (int i = 0; i < tempProducts.size(); i++) {
+            products.add(tempProducts.get(i));
+        }
+        return products;
+    }
+
+    public Long[] mergeLongArray(Long[] tempNum,Long[] num_2){
+        Long[] num = new Long[tempNum.length+num_2.length];
+        for (int i = 0; i < tempNum.length; i++) {
+            num[i] = tempNum[i];
+        }
+        for (int j = 0; j < num_2.length; j++) {
+            num[tempNum.length+j] = num_2[j];
+        }
+        return num;
     }
 
 }
